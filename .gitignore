@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Node
+node_modules/
+dist/
+*.log
+
+# Env / secrets
+.env
+.env.local
+*.pem
+*.key
+
+# DB / local state
+*.db
+*.sqlite*
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Claude local state
+.claude/
+
+# Build / misc
+*.tsbuildinfo
