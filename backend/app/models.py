@@ -28,6 +28,10 @@ class ActionKind(str, Enum):
     grant = "grant"
     revoke = "revoke"
     query = "query"
+    request = "request"
+    approve = "approve"
+    deny = "deny"
+    cancel = "cancel"
 
 
 class ActionResult(str, Enum):
@@ -36,11 +40,21 @@ class ActionResult(str, Enum):
     error = "error"
 
 
+class RequestStatus(str, Enum):
+    pending = "pending"
+    approved = "approved"
+    denied = "denied"
+    cancelled = "cancelled"
+
+
 # Stored as VARCHAR + CHECK — avoids Postgres enum-migration pain.
 _UserRoleT = SAEnum(UserRole, name="user_role", native_enum=False, length=16)
 _GateStatusT = SAEnum(GateStatus, name="gate_status", native_enum=False, length=16)
 _ActionKindT = SAEnum(ActionKind, name="action_kind", native_enum=False, length=16)
 _ActionResultT = SAEnum(ActionResult, name="action_result", native_enum=False, length=16)
+_RequestStatusT = SAEnum(
+    RequestStatus, name="request_status", native_enum=False, length=16
+)
 
 
 class User(Base):
@@ -84,6 +98,30 @@ class AccessLog(Base):
     action: Mapped[ActionKind] = mapped_column(_ActionKindT)
     result: Mapped[ActionResult] = mapped_column(_ActionResultT)
     message: Mapped[str | None] = mapped_column(String(240))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), index=True
+    )
+
+
+class GateRequest(Base):
+    __tablename__ = "gate_requests"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    requester_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    gate_id: Mapped[int] = mapped_column(
+        ForeignKey("gates.id", ondelete="CASCADE"), index=True
+    )
+    reason: Mapped[str | None] = mapped_column(String(500))
+    status: Mapped[RequestStatus] = mapped_column(
+        _RequestStatusT, default=RequestStatus.pending, index=True
+    )
+    decided_by: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL")
+    )
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    decision_note: Mapped[str | None] = mapped_column(String(500))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), index=True
     )

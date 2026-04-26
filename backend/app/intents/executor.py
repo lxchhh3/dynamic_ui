@@ -15,17 +15,23 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from typing import Any
 
+from datetime import datetime, timezone
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..llm import LLMClient, render_block
+from ..llm.profile import pick_autofill_fields
+from ..profiles import MOCK_PROFILES, PROFILE_FIELDS
 from ..models import (
     AccessLog,
     ActionKind,
     ActionResult,
     Gate,
     GatePermission,
+    GateRequest,
     GateStatus,
+    RequestStatus,
     User,
     UserRole,
 )
@@ -68,6 +74,66 @@ def _access_list_props(gate: Gate, users: list[User]) -> dict[str, Any]:
 
 def _access_list(gate: Gate, users: list[User]) -> dict:
     return {"type": "AccessList", "props": _access_list_props(gate, users)}
+
+
+def _request_dict(
+    req: GateRequest, gate: Gate, requester: User, decider: User | None
+) -> dict[str, Any]:
+    return {
+        "id": req.id,
+        "gateId": gate.id,
+        "gateLabel": gate.label,
+        "requester": requester.username,
+        "reason": req.reason,
+        "status": req.status.value,
+        "decidedBy": decider.username if decider else None,
+        "decidedAt": req.decided_at.isoformat() if req.decided_at else None,
+        "createdAt": req.created_at.isoformat() if req.created_at else None,
+    }
+
+
+def _request_card(
+    req: GateRequest, gate: Gate, requester: User, decider: User | None
+) -> dict:
+    return {
+        "type": "RequestCard",
+        "props": _request_dict(req, gate, requester, decider),
+    }
+
+
+def _request_list(items: list[dict[str, Any]], scope: str) -> dict:
+    return {"type": "RequestList", "props": {"scope": scope, "requests": items}}
+
+
+def _request_form(gate: Gate) -> dict:
+    return {
+        "type": "RequestForm",
+        "props": {"gateId": gate.id, "gateLabel": gate.label},
+    }
+
+
+async def _request_form_for_user(
+    gate: Gate, user: User, llm: LLMClient | None
+) -> dict:
+    """Build a RequestForm block, attaching profile + LLM-picked autofill list.
+
+    Falls back to a bare RequestForm (no profile, no autoFill) if there's no
+    mock profile for the user, the LLM is disabled, or the picker call fails.
+    """
+    block = _request_form(gate)
+    profile = MOCK_PROFILES.get(user.username, {})
+    if not profile or llm is None:
+        return block
+    auto_fill = await pick_autofill_fields(
+        llm,
+        username=user.username,
+        profile=profile,
+        field_keys=PROFILE_FIELDS,
+        request_context=f"requesting access to gate {gate.id} ({gate.label})",
+    )
+    block["props"]["profile"] = profile
+    block["props"]["autoFill"] = auto_fill
+    return block
 
 
 # ---------- helpers -----------------------------------------------------------
@@ -199,11 +265,22 @@ async def execute(
         )
         await session.commit()
         ctx = _context_for(intent, "Request not recognized as a gate action.")
+        # Track whether the LLM returned a real conversational reply. If it
+        # did, suppress the action-hint toast — pairing a friendly chat reply
+        # with a red "I didn't catch a gate action" toast contradicts itself.
+        had_chat_reply = False
         async for b in _yield_primary(
             llm, ctx, {}, [_msg(acknowledgement_text(intent))]
         ):
             yield b
-        yield _toast("error", "I didn't catch a gate action in that message.")
+            if b.get("type") == "AssistantMessage":
+                text = b.get("props", {}).get("text", "")
+                if text and text != acknowledgement_text(intent):
+                    had_chat_reply = True
+        if not had_chat_reply:
+            yield _toast(
+                "error", "I didn't catch a gate action in that message."
+            )
         return
 
     # --- list gates --------------------------------------------------------
@@ -217,6 +294,87 @@ async def execute(
         ):
             yield b
         yield _toast("success", f"{len(gates)} gates")
+        return
+
+    # --- list requests -----------------------------------------------------
+    if intent.kind == IntentKind.list_requests:
+        is_admin = user.role == UserRole.admin
+        scope = "all-pending" if is_admin else "mine"
+        q = select(GateRequest)
+        if is_admin:
+            # Admin view: show pending first by default. The phrase decides whether
+            # to include resolved ones. Default = all (so they can see history).
+            q = q.order_by(GateRequest.status, GateRequest.created_at.desc())
+        else:
+            q = q.where(GateRequest.requester_id == user.id).order_by(
+                GateRequest.created_at.desc()
+            )
+        reqs = list((await session.scalars(q)).all())
+
+        # Bulk-load referenced gates and users so the row dicts are dense.
+        gate_ids = {r.gate_id for r in reqs}
+        user_ids = {r.requester_id for r in reqs} | {
+            r.decided_by for r in reqs if r.decided_by
+        }
+        gates_by_id: dict[int, Gate] = {
+            g.id: g
+            for g in (
+                await session.scalars(
+                    select(Gate).where(Gate.id.in_(gate_ids))
+                )
+            ).all()
+        } if gate_ids else {}
+        users_by_id: dict[int, User] = {
+            u.id: u
+            for u in (
+                await session.scalars(
+                    select(User).where(User.id.in_(user_ids))
+                )
+            ).all()
+        } if user_ids else {}
+
+        items: list[dict[str, Any]] = []
+        for r in reqs:
+            g = gates_by_id.get(r.gate_id)
+            requester = users_by_id.get(r.requester_id)
+            decider = users_by_id.get(r.decided_by) if r.decided_by else None
+            if not g or not requester:
+                continue
+            items.append(_request_dict(r, g, requester, decider))
+
+        rl = _request_list(items, scope)
+        ctx = _context_for(
+            intent,
+            f"Showing {len(items)} access request(s) for {user.username} "
+            f"(scope: {scope}).",
+        )
+        snapshot = {"RequestList": rl["props"]}
+        async for b in _yield_primary(
+            llm, ctx, snapshot, [_msg(acknowledgement_text(intent)), rl]
+        ):
+            yield b
+        if not items:
+            yield _toast("success", "no requests")
+        else:
+            pending = sum(1 for it in items if it["status"] == "pending")
+            yield _toast(
+                "success",
+                f"{len(items)} request{'s' if len(items) != 1 else ''}"
+                + (f" · {pending} pending" if pending else ""),
+            )
+        return
+
+    # --- approve / deny / cancel a request ---------------------------------
+    if intent.kind in (
+        IntentKind.approve_request,
+        IntentKind.deny_request,
+        IntentKind.cancel_request,
+    ):
+        if intent.request_id is None:
+            yield _toast("error", "which request?")
+            return
+        async for b in _resolve_request(session, user, intent, llm):
+            yield b
         return
 
     # All remaining intents reference a gate.
@@ -236,6 +394,78 @@ async def execute(
         )
         await session.commit()
         yield _toast("error", f"no gate numbered {intent.gate_id}")
+        return
+
+    # --- request access ----------------------------------------------------
+    if intent.kind == IntentKind.request_access:
+        if user.role == UserRole.guest:
+            await _log(
+                session,
+                gate_id=gate.id,
+                user_id=user.id,
+                action=ActionKind.request,
+                result=ActionResult.denied,
+                message="guests cannot request gate permissions",
+            )
+            await session.commit()
+            yield _toast("denied", "guests can't request access")
+            return
+        if user.role == UserRole.admin:
+            yield _toast("success", "admins already have access — no request needed")
+            return
+        # Already permitted?
+        if await _has_permission(session, user.id, gate.id):
+            yield _toast("success", f"you already have access to gate {gate.id}")
+            return
+        # Already pending?
+        existing = await session.scalar(
+            select(GateRequest).where(
+                GateRequest.requester_id == user.id,
+                GateRequest.gate_id == gate.id,
+                GateRequest.status == RequestStatus.pending,
+            )
+        )
+        if existing:
+            requester = user
+            req_card = _request_card(existing, gate, requester, None)
+            yield req_card
+            yield _toast("denied", f"already pending — request #{existing.id}")
+            return
+
+        req = GateRequest(
+            requester_id=user.id,
+            gate_id=gate.id,
+            reason=intent.reason,
+            status=RequestStatus.pending,
+        )
+        session.add(req)
+        await _log(
+            session,
+            gate_id=gate.id,
+            user_id=user.id,
+            action=ActionKind.request,
+            result=ActionResult.success,
+            message=f"requested gate {gate.id}"
+            + (f" — {intent.reason[:120]}" if intent.reason else ""),
+        )
+        await session.commit()
+        await session.refresh(req)
+        card = _request_card(req, gate, user, None)
+        ctx = _context_for(
+            intent,
+            f"{user.username} submitted request #{req.id} for gate {gate.id} "
+            f"({gate.label})"
+            + (f" — reason: {intent.reason}" if intent.reason else "")
+            + ".",
+        )
+        snapshot = {"RequestCard": card["props"]}
+        async for b in _yield_primary(
+            llm, ctx, snapshot, [_msg(acknowledgement_text(intent)), card]
+        ):
+            yield b
+        yield _toast(
+            "success", f"request #{req.id} submitted — pending admin review"
+        )
         return
 
     # --- query access ------------------------------------------------------
@@ -304,6 +534,26 @@ async def execute(
             )
             await session.commit()
             yield {"type": "GateCard", "props": {**_gate_dict(gate), "animate": "denied"}}
+
+            # Surface the request sheet whenever a non-admin can't open/close —
+            # whether the gate just lacks-perm (closed) or is admin-controlled
+            # (locked). The user fills the sheet either way; no pending shortcut.
+            if action in (ActionKind.open, ActionKind.close) and (
+                "lacks permission" in reason or "locked" in reason
+            ):
+                yield await _request_form_for_user(gate, user, llm)
+                if "locked" in reason:
+                    yield _toast(
+                        "denied",
+                        "locked — fill the request sheet to ask an admin to unlock",
+                    )
+                else:
+                    yield _toast(
+                        "denied",
+                        "no access — fill the request sheet below to ask an admin",
+                    )
+                return
+
             yield _toast("denied", reason)
             return
 
@@ -501,3 +751,120 @@ async def execute(
         return
 
     yield _toast("error", "unhandled intent")
+
+
+# ---------- request resolution -----------------------------------------------
+
+
+async def _resolve_request(
+    session: AsyncSession,
+    user: User,
+    intent: Intent,
+    llm: LLMClient | None,
+) -> AsyncIterator[dict]:
+    """Approve / deny / cancel a GateRequest by id."""
+    assert intent.request_id is not None
+    req = await session.get(GateRequest, intent.request_id)
+    if not req:
+        yield _toast("error", f"no request #{intent.request_id}")
+        return
+
+    gate = await _get_gate(session, req.gate_id)
+    requester = await session.get(User, req.requester_id)
+    if not gate or not requester:
+        yield _toast("error", "request references a missing gate or user")
+        return
+
+    is_admin = user.role == UserRole.admin
+    is_owner = req.requester_id == user.id
+
+    # Authz per intent kind.
+    if intent.kind == IntentKind.cancel_request:
+        if not is_owner and not is_admin:
+            yield _toast("denied", "only the requester or an admin can cancel")
+            return
+        action = ActionKind.cancel
+        new_status = RequestStatus.cancelled
+    elif intent.kind == IntentKind.approve_request:
+        if not is_admin:
+            yield _toast("denied", "only admins can approve requests")
+            return
+        action = ActionKind.approve
+        new_status = RequestStatus.approved
+    elif intent.kind == IntentKind.deny_request:
+        if not is_admin:
+            yield _toast("denied", "only admins can deny requests")
+            return
+        action = ActionKind.deny
+        new_status = RequestStatus.denied
+    else:  # pragma: no cover — caller filters this
+        yield _toast("error", "unhandled request action")
+        return
+
+    if req.status != RequestStatus.pending:
+        # Surface the existing card so the user sees its current state.
+        decider = (
+            await session.get(User, req.decided_by) if req.decided_by else None
+        )
+        yield _request_card(req, gate, requester, decider)
+        yield _toast(
+            "denied",
+            f"request #{req.id} is already {req.status.value} — no change",
+        )
+        return
+
+    # Apply the decision.
+    req.status = new_status
+    req.decided_by = user.id
+    req.decided_at = datetime.now(timezone.utc)
+
+    # Approve auto-grants the permission (idempotent).
+    if new_status == RequestStatus.approved:
+        existing_perm = await session.scalar(
+            select(GatePermission).where(
+                GatePermission.user_id == requester.id,
+                GatePermission.gate_id == gate.id,
+            )
+        )
+        if not existing_perm:
+            session.add(
+                GatePermission(
+                    user_id=requester.id, gate_id=gate.id, granted_by=user.id
+                )
+            )
+
+    await _log(
+        session,
+        gate_id=gate.id,
+        user_id=user.id,
+        action=action,
+        result=ActionResult.success,
+        message=f"request #{req.id} {new_status.value} by {user.username}",
+    )
+    await session.commit()
+    await session.refresh(req)
+
+    decider = await session.get(User, user.id)
+    card = _request_card(req, gate, requester, decider)
+    verb = {
+        RequestStatus.approved: "approved",
+        RequestStatus.denied: "denied",
+        RequestStatus.cancelled: "cancelled",
+    }[new_status]
+    extra = (
+        " (permission granted)" if new_status == RequestStatus.approved else ""
+    )
+    ctx = _context_for(
+        intent,
+        f"Request #{req.id} for gate {gate.id} ({gate.label}) by "
+        f"{requester.username} was {verb} by {user.username}{extra}.",
+    )
+    snapshot = {"RequestCard": card["props"]}
+    async for b in _yield_primary(
+        llm, ctx, snapshot, [_msg(acknowledgement_text(intent)), card]
+    ):
+        yield b
+    yield _toast(
+        "success" if new_status != RequestStatus.denied else "denied",
+        f"request #{req.id} {verb}{extra}",
+    )

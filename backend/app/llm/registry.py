@@ -57,8 +57,45 @@ FULL_REGISTRY: dict[str, Any] = {
                 "users": {"type": "array", "required": True},
             },
         },
+        {
+            "name": "RequestCard",
+            "props": {
+                "id": {"type": "number", "required": True},
+                "gateId": {"type": "number", "required": True},
+                "gateLabel": {"type": "string", "required": True},
+                "requester": {"type": "string", "required": True},
+                "reason": {"type": "string"},
+                "status": {
+                    "type": "string",
+                    "enum": ["pending", "approved", "denied", "cancelled"],
+                    "required": True,
+                },
+                "decidedBy": {"type": "string"},
+                "decidedAt": {"type": "string"},
+                "createdAt": {"type": "string"},
+            },
+        },
+        {
+            "name": "RequestList",
+            "props": {
+                "scope": {
+                    "type": "string",
+                    "enum": ["mine", "all-pending"],
+                },
+                "requests": {"type": "array", "required": True},
+            },
+        },
+        {
+            "name": "RequestForm",
+            "props": {
+                "gateId": {"type": "number", "required": True},
+                "gateLabel": {"type": "string", "required": True},
+            },
+        },
     ],
 }
 
-DATA_BEARING: frozenset[str] = frozenset({"GateCard", "GateGrid", "AccessList"})
+DATA_BEARING: frozenset[str] = frozenset(
+    {"GateCard", "GateGrid", "AccessList", "RequestCard", "RequestList", "RequestForm"}
+)
 TEXT_BEARING: frozenset[str] = frozenset({"AssistantMessage", "Alert"})

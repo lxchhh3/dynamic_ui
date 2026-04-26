@@ -27,12 +27,12 @@ export default function GatePanel() {
 
   if (!hydrated) {
     return (
-      <div className="p-6 text-sm text-gate-muted font-mono">loading gates…</div>
+      <div className="p-6 text-sm text-skin-muted font-mono">loading gates…</div>
     )
   }
 
   return (
-    <motion.div layout className="p-5 grid grid-cols-2 gap-3 overflow-y-auto">
+    <motion.div layout className="p-5 flex flex-col gap-3" data-testid="gates-panel">
       {order.map((id) => {
         const g = byId[id]
         return <GateCard key={id} id={g.id} label={g.label} status={g.status} animate={g.animate} />

@@ -50,6 +50,12 @@ def _summarize(blocks: list[dict]) -> tuple[str, str]:
             parts.append(f"grid({len(props.get('gates') or [])})")
         elif t == "AccessList":
             parts.append(f"access[gate{props.get('gateId')}:{len(props.get('users') or [])}]")
+        elif t == "RequestCard":
+            parts.append(
+                f"req#{props.get('id')}[gate{props.get('gateId')}:{props.get('status')}]"
+            )
+        elif t == "RequestList":
+            parts.append(f"req-list({len(props.get('requests') or [])})")
         elif t == "Alert":
             parts.append(f"alert:{(props.get('text') or '')[:80]}")
     return outcome, " | ".join(parts)[:500]

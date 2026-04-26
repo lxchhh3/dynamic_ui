@@ -34,3 +34,6 @@ Thumbs.db
 
 # Build / misc
 *.tsbuildinfo
+
+# Playwright verify artifacts (regenerated on each run)
+frontend/verify/out/

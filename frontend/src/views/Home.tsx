@@ -13,14 +13,13 @@ export default function Home() {
   const { startUserTurn, appendBlock, finishTurn, sending } = useChat()
   const applyGate = useGates((s) => s.apply)
 
-  const onSend = useCallback(
-    async (message: string) => {
+  const runMessage = useCallback(
+    async (message: string, opts?: { silent?: boolean }) => {
       if (!token || sending) return
-      const turnId = startUserTurn(message)
+      const turnId = startUserTurn(message, opts)
       try {
         for await (const block of streamChat({ token, message })) {
           appendBlock(turnId, block)
-          // Mirror any gate mutations into the side panel
           if (block.type === 'GateCard') {
             applyGate({
               id: block.props.id,
@@ -42,28 +41,41 @@ export default function Home() {
     [token, sending, startUserTurn, appendBlock, finishTurn, applyGate],
   )
 
-  // Clear any transient chat on first mount if it somehow survived (Zustand stores are per-session).
+  const onSend = useCallback((message: string) => runMessage(message), [runMessage])
+
+  // Bridge: interactive blocks (e.g. RequestForm) dispatch this with a synthesized
+  // chat message. Run silent so the user's chat history doesn't show text they
+  // never typed.
   useEffect(() => {
-    /* noop */
-  }, [])
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent<string>).detail
+      if (typeof detail === 'string' && detail.trim()) {
+        void runMessage(detail, { silent: true })
+      }
+    }
+    window.addEventListener('cu:chat-send', handler)
+    return () => window.removeEventListener('cu:chat-send', handler)
+  }, [runMessage])
 
   return (
-    <div className="min-h-full flex">
+    <div className="h-screen flex overflow-hidden">
       <Sidebar />
-      <main className="flex-1 min-w-0 flex flex-col border-r border-gate-border">
-        <header className="px-6 py-3 border-b border-gate-border flex items-center justify-between">
-          <div className="text-sm text-gate-muted font-mono">chat · tell the system what to do</div>
+      <main className="relative flex-1 min-w-0 flex flex-col border-r border-skin-border">
+        <header className="px-6 py-3 border-b border-skin-border flex items-center justify-between">
+          <div className="text-sm text-skin-muted font-mono">chat · tell the system what to do</div>
         </header>
         <MessageList />
-        <div className="p-4 border-t border-gate-border">
+        <div className="p-4 border-t border-skin-border">
           <ChatInput onSend={onSend} disabled={sending} />
         </div>
       </main>
-      <aside className="w-[420px] shrink-0 flex flex-col">
-        <div className="px-5 py-3 border-b border-gate-border text-sm text-gate-muted font-mono">
+      <aside className="w-[420px] shrink-0 flex flex-col overflow-hidden">
+        <div className="px-5 py-3 border-b border-skin-border text-sm text-skin-muted font-mono">
           gates · live
         </div>
-        <GatePanel />
+        <div className="flex-1 overflow-y-auto">
+          <GatePanel />
+        </div>
       </aside>
     </div>
   )

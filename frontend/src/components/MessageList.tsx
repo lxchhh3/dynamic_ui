@@ -14,7 +14,7 @@ export default function MessageList() {
 
   if (turns.length === 0) {
     return (
-      <div className="flex-1 flex items-center justify-center text-gate-muted text-sm font-mono">
+      <div className="flex-1 flex items-center justify-center text-skin-muted text-sm font-mono">
         start by asking something about gates · e.g. "list gates"
       </div>
     )
@@ -41,7 +41,7 @@ function TurnBlock({ turn }: { turn: ChatTurn }) {
         transition={{ duration: 0.2 }}
         className="flex justify-end"
       >
-        <div className="max-w-xl bg-gate-accent/15 border border-gate-accent/30 text-gate-text rounded-2xl px-4 py-2 text-sm">
+        <div className="max-w-xl bg-skin-accent/15 border border-skin-accent/30 text-skin-ink rounded-2xl px-4 py-2 text-sm">
           {turn.userMessage}
         </div>
       </motion.div>
@@ -56,7 +56,7 @@ function TurnBlock({ turn }: { turn: ChatTurn }) {
       className="space-y-3"
     >
       {turn.blocks.length === 0 && turn.streaming && (
-        <div className="inline-flex items-center gap-2 text-gate-muted text-sm">
+        <div className="inline-flex items-center gap-2 text-skin-muted text-sm">
           <Loader2 size={14} className="animate-spin" />
           <span>thinking…</span>
         </div>
@@ -67,7 +67,7 @@ function TurnBlock({ turn }: { turn: ChatTurn }) {
         </div>
       ))}
       {turn.error && (
-        <div className="text-sm text-gate-locked">⚠ {turn.error}</div>
+        <div className="text-sm text-skin-danger">⚠ {turn.error}</div>
       )}
     </motion.div>
   )

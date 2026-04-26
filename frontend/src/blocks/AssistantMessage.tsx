@@ -6,7 +6,7 @@ export default function AssistantMessage({ text }: { text: string }) {
       initial={{ opacity: 0, y: 6 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.25 }}
-      className="text-[15px] leading-relaxed text-gate-text max-w-xl"
+      className="text-[15px] leading-relaxed text-skin-ink max-w-xl"
     >
       {text}
     </motion.div>

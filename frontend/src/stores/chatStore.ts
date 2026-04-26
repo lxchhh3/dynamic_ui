@@ -13,7 +13,10 @@ export interface ChatTurn {
 interface ChatState {
   turns: ChatTurn[]
   sending: boolean
-  startUserTurn: (message: string) => string // returns turnId
+  // `silent` skips painting the user bubble — used when an interactive block
+  // (e.g. RequestForm) synthesizes a command on the user's behalf, so the chat
+  // doesn't show text the user never actually typed.
+  startUserTurn: (message: string, opts?: { silent?: boolean }) => string
   appendBlock: (turnId: string, block: Block) => void
   finishTurn: (turnId: string, error?: string) => void
   reset: () => void
@@ -22,17 +25,21 @@ interface ChatState {
 export const useChat = create<ChatState>((set) => ({
   turns: [],
   sending: false,
-  startUserTurn(message) {
+  startUserTurn(message, opts) {
     const userId = crypto.randomUUID()
     const botId = crypto.randomUUID()
-    set((s) => ({
-      sending: true,
-      turns: [
-        ...s.turns,
-        { id: userId, role: 'user', userMessage: message, blocks: [], streaming: false },
-        { id: botId, role: 'assistant', blocks: [], streaming: true },
-      ],
-    }))
+    const newTurns: ChatTurn[] = []
+    if (!opts?.silent) {
+      newTurns.push({
+        id: userId,
+        role: 'user',
+        userMessage: message,
+        blocks: [],
+        streaming: false,
+      })
+    }
+    newTurns.push({ id: botId, role: 'assistant', blocks: [], streaming: true })
+    set((s) => ({ sending: true, turns: [...s.turns, ...newTurns] }))
     return botId
   },
   appendBlock(turnId, block) {

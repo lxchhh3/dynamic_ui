@@ -6,6 +6,9 @@ import Toast from './Toast'
 import GateGrid from './GateGrid'
 import AccessList from './AccessList'
 import Alert from './Alert'
+import RequestCard, { type RequestStatus } from './RequestCard'
+import RequestList from './RequestList'
+import RequestSheet from './RequestSheet'
 
 export type AssistantMessageBlock = {
   type: 'AssistantMessage'
@@ -41,6 +44,41 @@ export type AlertBlock = {
   props: { message: string; severity?: 'info' | 'warning' | 'error' }
 }
 
+export type RequestCardBlock = {
+  type: 'RequestCard'
+  props: {
+    id: number
+    gateId: number
+    gateLabel: string
+    requester: string
+    reason?: string | null
+    status: RequestStatus
+    decidedBy?: string | null
+    decidedAt?: string | null
+    createdAt?: string | null
+  }
+}
+
+export type RequestListBlock = {
+  type: 'RequestList'
+  props: {
+    scope?: 'mine' | 'all-pending'
+    requests: RequestCardBlock['props'][]
+  }
+}
+
+export type RequestFormBlock = {
+  type: 'RequestForm'
+  props: {
+    gateId: number
+    gateLabel: string
+    // LLM-picked auto-fill plumbing. Optional so older / LLM-disabled
+    // backends still render a fillable sheet.
+    profile?: Record<string, string>
+    autoFill?: string[]
+  }
+}
+
 export type Block =
   | AssistantMessageBlock
   | GateCardBlockT
@@ -48,6 +86,9 @@ export type Block =
   | AccessListBlock
   | ToastBlock
   | AlertBlock
+  | RequestCardBlock
+  | RequestListBlock
+  | RequestFormBlock
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyComp = (p: any) => ReactElement
@@ -59,6 +100,9 @@ const registry: Record<Block['type'], AnyComp> = {
   AccessList: AccessList as AnyComp,
   Toast: Toast as AnyComp,
   Alert: Alert as AnyComp,
+  RequestCard: RequestCard as AnyComp,
+  RequestList: RequestList as AnyComp,
+  RequestForm: RequestSheet as AnyComp,
 }
 
 // Handler-identifier allowlist. LLM-picked handler names are looked up here;
@@ -88,7 +132,7 @@ export function BlockRenderer({ block }: { block: Block }) {
   const Comp = registry[block.type]
   if (!Comp) {
     return (
-      <pre className="text-xs text-gate-locked font-mono bg-gate-surface/50 p-2 rounded">
+      <pre className="text-xs text-skin-danger font-mono bg-skin-surface/50 p-2 rounded">
         unknown block: {JSON.stringify(block)}
       </pre>
     )
