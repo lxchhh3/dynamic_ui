@@ -5,7 +5,9 @@ services:
     environment:
       POSTGRES_DB: custom_ui
       POSTGRES_USER: custom_ui
-      POSTGRES_PASSWORD: custom_ui_dev
+      # Read from .env (see backend/.env.example). Fails loud if unset rather
+      # than silently using a known default literal.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}
     ports:
       - "127.0.0.1:5433:5432"
     volumes:

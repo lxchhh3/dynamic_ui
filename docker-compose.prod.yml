@@ -5,7 +5,7 @@ services:
     environment:
       POSTGRES_DB: custom_ui
       POSTGRES_USER: custom_ui
-      POSTGRES_PASSWORD: ${DB_PASSWORD:-custom_ui_prod_default}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD must be set}
     volumes:
       - custom_ui_pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -19,7 +19,7 @@ services:
     build: ./backend
     container_name: custom-ui-api
     environment:
-      DATABASE_URL: postgresql+asyncpg://custom_ui:${DB_PASSWORD:-custom_ui_prod_default}@db:5432/custom_ui
+      DATABASE_URL: postgresql+asyncpg://custom_ui:${DB_PASSWORD:?DB_PASSWORD must be set}@db:5432/custom_ui
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set}
       JWT_ALGORITHM: HS256
       JWT_EXPIRE_DAYS: "7"
