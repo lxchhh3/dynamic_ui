@@ -130,7 +130,7 @@ From the WSL/Git-Bash shell, with Docker Desktop running:
 ```bash
 # Batch mode — runs all 30 eval prompts
 MSYS_NO_PATHCONV=1 docker run --rm --gpus all \
-  -v /d/Proj/local_qwen_in_armous:/workspace -w /workspace/eval \
+  -v /d/Proj/local_qwen_workspace:/workspace -w /workspace/eval \
   qwen-eval:nv25.02 \
   python run_model.py \
     --model models/qwen3-14b \
@@ -143,7 +143,7 @@ MSYS_NO_PATHCONV=1 docker run --rm --gpus all \
 
 # Ad-hoc probe — pass any intents.json
 MSYS_NO_PATHCONV=1 docker run --rm --gpus all \
-  -v /d/Proj/local_qwen_in_armous:/workspace -w /workspace/eval \
+  -v /d/Proj/local_qwen_workspace:/workspace -w /workspace/eval \
   qwen-eval:nv25.02 \
   python probe.py \
     --model models/qwen3-14b \
