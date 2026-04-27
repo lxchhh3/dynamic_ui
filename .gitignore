@@ -37,3 +37,6 @@ Thumbs.db
 
 # Playwright verify artifacts (regenerated on each run)
 frontend/verify/out/
+
+# Internal references — never push (may contain credentials, scratch notes, etc.)
+DB_ref/
